@@ -13,3 +13,4 @@ argon2-cffi>=23.1
 email-validator>=2.2
 pgvector>=0.3
 langgraph>=0.2
+psycopg[binary]
