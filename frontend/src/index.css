@@ -1,0 +1,16 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Design tokens (space-separated RGB so Tailwind opacity works). See docs/design-system.md */
+:root {
+  --bg: 246 244 239; --card: 255 255 255; --side: 24 38 46; --line: 226 222 213;
+  --ink: 28 33 38; --mute: 98 106 112; --accent: 14 116 112; --accent-ink: 255 255 255;
+}
+.dark {
+  --bg: 15 20 24; --card: 22 29 34; --side: 11 15 18; --line: 40 50 57;
+  --ink: 232 236 238; --mute: 148 160 168; --accent: 45 190 180; --accent-ink: 8 24 26;
+}
+body { @apply bg-bg text-ink font-sans antialiased; }
+:focus-visible { @apply outline-2 outline-offset-2 outline-accent; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }

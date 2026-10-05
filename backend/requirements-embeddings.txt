@@ -1,0 +1,2 @@
+# Optional: real local embeddings for EMBEDDING_PROVIDER=fastembed (ONNX, no PyTorch). Downloads ~130 MB on first use.
+fastembed>=0.4

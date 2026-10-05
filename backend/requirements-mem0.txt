@@ -1,0 +1,6 @@
+# Optional: only needed for MEMORY_PROVIDER=mem0. Heavy; first run also downloads the embedding model (~130 MB).
+mem0ai>=2.2
+fastembed>=0.4
+psycopg[binary,pool]>=3.2
+google-genai>=1.0   # if LLM_PROVIDER=gemini
+ollama>=0.4         # if LLM_PROVIDER=ollama

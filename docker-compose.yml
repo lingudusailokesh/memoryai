@@ -1,0 +1,31 @@
+services:
+  db:
+    image: pgvector/pgvector:pg16   # pgvector is used from Stage 7; extension is created then
+    environment:
+      POSTGRES_USER: memoryai
+      POSTGRES_PASSWORD: memoryai   # local dev only
+      POSTGRES_DB: memoryai
+    ports: ["5432:5432"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U memoryai"]
+      interval: 5s
+      retries: 10
+  backend:
+    build: ./backend
+    environment:
+      DATABASE_URL: postgresql+asyncpg://memoryai:memoryai@db:5432/memoryai
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
+      CORS_ORIGINS: http://localhost:5173
+      LLM_PROVIDER: ${LLM_PROVIDER:-fake}
+      MEMORY_PROVIDER: ${MEMORY_PROVIDER:-fake}
+    ports: ["8000:8000"]
+    depends_on:
+      db:
+        condition: service_healthy
+  frontend:
+    build: ./frontend
+    ports: ["5173:80"]
+    depends_on: [backend]
+volumes:
+  pgdata:
