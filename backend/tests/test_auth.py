@@ -2,6 +2,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 import jwt
+import pytest
 from sqlalchemy import select
 
 from app.config import settings
@@ -54,6 +55,59 @@ async def test_login_success_and_failures_look_identical(client):
     no_user = await client.post("/api/auth/login", json={"email": "ghost@x.com", "password": PW})
     assert bad_pw.status_code == no_user.status_code == 401
     assert bad_pw.json() == no_user.json()
+
+
+async def test_email_normalization_survives_logout_and_login(client):
+    await register(client, "  Ada@EXAMPLE.com  ")
+    assert (await client.post("/api/auth/logout")).status_code == 204
+    assert (await client.post("/api/auth/refresh")).status_code == 401
+    r = await client.post("/api/auth/login", json={"email": " ADA@example.COM ", "password": PW})
+    assert r.status_code == 200, r.text
+    me = await client.get("/api/me", headers=bearer(r.json()["access_token"]))
+    assert me.status_code == 200 and me.json()["email"] == "ada@example.com"
+
+
+@pytest.mark.parametrize("password", [" CaseSensitive-123 ", "Pässwörd-漢字-123"])
+async def test_password_is_verified_exactly_as_registered(client, password):
+    await register(client, pw=password)
+    correct = await client.post("/api/auth/login", json={"email": "a@x.com", "password": password})
+    assert correct.status_code == 200
+    changed = await client.post("/api/auth/login", json={"email": "a@x.com", "password": password.swapcase()})
+    assert changed.status_code == 401
+    if password != password.strip():
+        trimmed = await client.post("/api/auth/login", json={"email": "a@x.com", "password": password.strip()})
+        assert trimmed.status_code == 401
+
+
+async def test_registration_is_scoped_to_its_database(client):
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from app.db.base import Base
+    from app.services.auth import AuthService, InvalidCredentials
+
+    await register(client)
+    other_database = create_async_engine("sqlite+aiosqlite://")
+    try:
+        async with other_database.begin() as connection:
+            await connection.run_sync(Base.metadata.create_all)
+        async with async_sessionmaker(other_database)() as session:
+            with pytest.raises(InvalidCredentials):
+                await AuthService(session).login("a@x.com", PW)
+    finally:
+        await other_database.dispose()
+
+
+async def test_seeded_demo_can_log_in_through_validated_api(client, engine, monkeypatch):
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+    from scripts import seed
+
+    monkeypatch.setattr(seed, "SessionLocal", async_sessionmaker(engine, expire_on_commit=False))
+    await seed.main()
+    async with async_sessionmaker(engine)() as session:
+        email = (await session.execute(select(User.email))).scalar_one()
+    r = await client.post("/api/auth/login", json={"email": email, "password": "demo-password-123"})
+    assert r.status_code == 200, r.text
+    me = await client.get("/api/me", headers=bearer(r.json()["access_token"]))
+    assert me.status_code == 200 and me.json()["name"] == "Demo User"
 
 
 async def test_refresh_rotates_and_old_token_is_dead(client):
