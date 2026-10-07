@@ -7,7 +7,38 @@ export class ApiError extends Error {
   constructor(public status: number, message: string) { super(message); }
 }
 
-function request(path: string, init: RequestInit = {}): Promise<Response> {
+// Render's free services can be asleep independently. Wait using a read-only
+// database readiness probe; never retry an authentication POST automatically.
+let readiness: Promise<void> | null = null;
+async function checkReadiness(): Promise<void> {
+  const deadline = Date.now() + 120_000;
+  while (Date.now() < deadline) {
+    try {
+      const r = await fetch("/api/ready", {
+        credentials: "include", cache: "no-store",
+        signal: AbortSignal.timeout(Math.min(10_000, deadline - Date.now())),
+      });
+      if (r.ok && (await r.json().catch(() => null))?.status === "ready") return;
+      if (!r.ok && r.status < 500 && r.status !== 429) {
+        throw new ApiError(r.status, "Could not reach the server. Please try again.");
+      }
+    } catch (error) {
+      if (error instanceof ApiError) throw error;
+      // Network failures and gateway/startup responses are safe to probe again.
+    }
+    const remaining = deadline - Date.now();
+    if (remaining > 0) await new Promise<void>((resolve) => setTimeout(resolve, Math.min(2_000, remaining)));
+  }
+  throw new ApiError(503, "The server is still starting or unavailable. Please try again shortly.");
+}
+
+function waitForBackend(): Promise<void> {
+  readiness ??= checkReadiness().finally(() => { readiness = null; });
+  return readiness;
+}
+
+async function request(path: string, init: RequestInit = {}): Promise<Response> {
+  if (["/auth/login", "/auth/register", "/auth/refresh"].includes(path)) await waitForBackend();
   const headers = new Headers(init.headers);
   if (init.body) headers.set("Content-Type", "application/json");
   if (accessToken) headers.set("Authorization", `Bearer ${accessToken}`);
@@ -22,7 +53,10 @@ export function refreshSession(): Promise<boolean> {
     if (!r.ok) { setAccessToken(null); return false; }
     setAccessToken(((await r.json()) as { access_token: string }).access_token);
     return true;
-  })().finally(() => { refreshing = null; });
+  })().catch(() => {
+    setAccessToken(null);
+    return false;
+  }).finally(() => { refreshing = null; });
   return refreshing;
 }
 
@@ -31,7 +65,9 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   if (r.status === 401 && !path.startsWith("/auth/") && (await refreshSession())) r = await request(path, init);
   if (!r.ok) {
     const body = (await r.json().catch(() => null)) as { detail?: unknown } | null;
-    const msg = typeof body?.detail === "string" ? body.detail : "Check your details and try again.";
+    const msg = typeof body?.detail === "string" ? body.detail
+      : r.status >= 500 ? "The server is unavailable. Please try again shortly."
+      : "Check your details and try again.";
     throw new ApiError(r.status, msg);
   }
   return r.status === 204 ? (undefined as T) : ((await r.json()) as T);

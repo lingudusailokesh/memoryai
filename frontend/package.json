@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "scripts": { "dev": "vite", "build": "tsc && vite build", "typecheck": "tsc --noEmit" },
+  "scripts": { "dev": "vite", "build": "tsc && vite build", "typecheck": "tsc --noEmit", "test": "node --test tests/*.test.mjs" },
   "dependencies": {
     "lucide-react": "^0.453.0",
     "react": "^18.3.1",
