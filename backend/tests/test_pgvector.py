@@ -101,3 +101,8 @@ async def test_dedupe_conflict_restore_and_inbox_in_postgres(pg, monkeypatch):
     await p.add_exchange(uid, "x", "y")
     [pending] = await p.list_pending(uid, limit=5)
     assert (await p.approve(uid, pending.id)).status == "active"
+
+
+async def test_cross_chat_preference_context_in_postgres(pg):
+    from tests.test_custom_memory import assert_cross_chat_preference_recall
+    await assert_cross_chat_preference_recall(pg)

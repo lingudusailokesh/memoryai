@@ -34,6 +34,15 @@ class MemoryRepository:
             .order_by(Memory.created_at.desc(), Memory.id).limit(limit))
         return res.scalars().all()
 
+    async def preferences(self, user_id: uuid.UUID, limit: int) -> Sequence[Memory]:
+        """Explicit profile recall: only this user's approved, active preferences."""
+        res = await self.session.execute(
+            select(Memory).where(Memory.user_id == user_id, Memory.status == "active",
+                                 Memory.category == "preference")
+            .order_by(Memory.pinned.desc(), Memory.importance.desc(), Memory.created_at.desc(), Memory.id)
+            .limit(limit))
+        return res.scalars().all()
+
     async def get(self, user_id: uuid.UUID, memory_id: uuid.UUID, statuses: Sequence[str] = ("active",)) -> Memory | None:
         res = await self.session.execute(
             select(Memory).where(Memory.id == memory_id, Memory.user_id == user_id, Memory.status.in_(statuses)))
