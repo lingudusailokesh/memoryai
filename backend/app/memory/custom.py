@@ -11,6 +11,7 @@ from app.memory.dedupe import decide_pairs
 from app.memory.embeddings import EmbeddingProvider
 from app.memory.extraction import MemoryExtractor, refine_importance
 from app.memory.scoring import relevance
+from app.memory.recall import asks_for_preferences
 from app.memory.sensitive import check_sensitive
 from app.models import Memory
 from app.repositories.memories import MemoryRepository
@@ -46,6 +47,13 @@ class CustomMemoryProvider(MemoryProvider):
         uid = _uuid(user_id)
         if uid is None:
             return []
+        if top_k <= 0:
+            return []
+        if asks_for_preferences(query):
+            async with self.maker() as s:
+                rows = await MemoryRepository(s).preferences(uid, top_k)
+            # Category membership is the relevance criterion here, not topic similarity.
+            return [_item(m) for m in rows]
         vec = (await self.embedder.embed([query]))[0]
         async with self.maker() as s:
             rows = await MemoryRepository(s).similar(uid, vec, limit=top_k * 3)  # over-fetch, then re-rank

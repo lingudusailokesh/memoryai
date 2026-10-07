@@ -1,0 +1,19 @@
+# Cross-chat preference recall
+
+The custom provider previously embedded only the latest message, queried this user's active rows, and discarded every result below MEMORY_MIN_SIMILARITY (default 0.45). With the default EMBEDDING_PROVIDER=fake, `what do i like` and `User likes Python` have cosine similarity zero: the hash embedder matches tokens, not meaning (like != likes). Existing tests asked questions that repeated the saved topic. Merely listing a memory on the Memories page does not establish that it was retrieved for a turn.
+
+Explicit broad preference questions now request a bounded category lookup of this user's active preference rows. They are ordered by pinned, importance, recency, then ID, and capped by MEMORY_TOP_K. Pending and superseded rows are excluded. Other queries retain the existing similarity gate and scoring. Nothing is hardcoded to Python; category membership supplies relevance for a request about preferences. Topic-specific queries such as `what do I like about Java?` still use semantic/topic retrieval. The small English intent recognizer is deliberately conservative, not a general natural-language classifier.
+
+The chat service still checks both conversation and global consent before search. The normal system-prompt data wrapper and length caps apply. Deleted rows cannot be retrieved. There is no memory-result cache. Tests capture the actual provider's final model prompt after saving the fact in a separate source chat, using real database repositories with SQLite and PostgreSQL/pgvector. They check other-user isolation, both consent switches, deletion, status/category filters, and the unchanged topic gate.
+
+## Production evidence still needed
+
+Public `/api/health` reports `memory_provider=custom` and `llm_provider=gemini`. Render tools and authenticated access to the reported conversations are unavailable in this session. The exact production embedder, stored category/status at request time, search errors/timeouts, and chronology remain unverified. The confirmed code defect reproduces the observation but is not proof of the private production turn's cause.
+
+October 7, 2026, 12:53–12:54 IST is 07:23–07:24 UTC. Extraction runs asynchronously after the assistant reply; writes can finish later or fail. A currently active fact does not establish it existed before the failed question. To resolve chronology securely, inspect the signed-in user's `/api/memories` entry (ID, category, status, created_at, updated_at), source and target `/api/conversations/{id}/messages` timestamps, and `/api/messages/{assistant_message_id}/memories-used`. Do not share auth headers, cookies, or tokens. Check backend log lines around 07:23–07:24 UTC for `memory search failed; answering without memory` or `memory write failed`. Approval timing may need memory history/logs; created_at alone does not prove it was active then.
+
+## Deployment and verification
+
+Deploy only backend service `memoryai` after merging the fix. No frontend, environment, schema, migration, or secret changes are required. Retain existing root directory, Dockerfile and start command. Do not switch embedding models without migrating/re-embedding existing vectors, and do not lower similarity thresholds to compensate.
+
+Once `/api/ready` returns 200, use a disposable signed-in account with both memory switches enabled. Save a preference in one chat and wait until the Memories page shows it active (approve if in Ask mode). In a different chat ask `what do I like?`. Confirm the saved preference appears in the assistant message's memories-used endpoint as well as the answer. Repeat with another user's account, with memory off, and after deletion: the fact must not enter context. The regression verifies prompt delivery, not a guarantee of a third-party model's wording. If a stored fact was classified outside preference, inspect extraction/category rather than silently reclassifying production data.

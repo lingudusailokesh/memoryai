@@ -226,3 +226,80 @@ async def test_chat_with_custom_provider_remembers_and_recalls(client, engine, p
     assert (await client.patch(f"/api/memories/{mid}", json={"text": "I enjoy Rust."}, headers=h)).json()["text"] == "I enjoy Rust."
     assert (await client.delete(f"/api/memories/{mid}", headers=h)).status_code == 204
     assert (await client.get("/api/memories", headers=h)).json() == []
+
+
+async def assert_cross_chat_preference_recall(engine):
+    from app.llm.fake import FakeLLMProvider
+    from app.services.chat import ChatService
+    from app.models import User
+    p, _, emb, uid, other = await make(engine, facts(("User likes Python", "preference", 0.8)))
+    async with p.maker() as s:
+        source = await ConversationRepository(s).create(uuid.UUID(uid))
+        target = await ConversationRepository(s).create(uuid.UUID(uid))
+        outsider = await ConversationRepository(s).create(uuid.UUID(other))
+    await p.add_exchange(uid, "I like Python", "Great", source=str(source.id))
+    vecs = await emb.embed(["what do i like", "User likes Python"])
+    assert sum(a * b for a, b in zip(*vecs)) == 0
+    llm = FakeLLMProvider()
+    service = ChatService(p.maker, llm, p)
+    turn = await service.start_turn(uuid.UUID(uid), target.id, "what do i like?")
+    turn.store_memory = False
+    assert [m.text for m in turn.memories] == ["User likes Python"]
+    stream = service.stream(uuid.UUID(uid), turn)
+    await anext(stream)
+    assert "User likes Python" in llm.chat_calls[-1][0].content
+    await stream.aclose()
+    other_turn = await service.start_turn(uuid.UUID(other), outsider.id, "what do i like?")
+    assert other_turn.memories == [] and "User likes Python" not in other_turn.messages[0].content
+    async with p.maker() as s:
+        user = await s.get(User, uuid.UUID(uid))
+        user.memory_globally_enabled = False
+        await s.commit()
+    assert (await service.start_turn(uuid.UUID(uid), target.id, "what do i like?")).memories == []
+    async with p.maker() as s:
+        user = await s.get(User, uuid.UUID(uid))
+        user.memory_globally_enabled = True
+        await s.commit()
+    async with p.maker() as s:
+        await ConversationRepository(s).update(uuid.UUID(uid), target.id, memory_enabled=False)
+    assert (await service.start_turn(uuid.UUID(uid), target.id, "what do i like?")).memories == []
+    async with p.maker() as s:
+        await ConversationRepository(s).update(uuid.UUID(uid), target.id, memory_enabled=True)
+    [m] = await p.list_all(uid, limit=5)
+    assert await p.delete(uid, m.id)
+    assert (await service.start_turn(uuid.UUID(uid), target.id, "what do i like?")).memories == []
+
+
+async def test_cross_chat_preference_reaches_model(engine):
+    await assert_cross_chat_preference_recall(engine)
+
+
+async def test_profile_recall_filters_status_category_and_limits(engine):
+    p, _, _, uid, _ = await make(engine)
+    from app.memory.extraction import Candidate
+    from app.repositories.memories import MemoryRepository
+    async with p.maker() as s:
+        repo = MemoryRepository(s)
+        for status, category, content in [
+            ("active", "preference", "User likes tea"), ("pending", "preference", "User likes coffee"),
+            ("superseded", "preference", "User likes milk"), ("active", "skill", "User knows Rust"),
+        ]:
+            await repo.add_one(uuid.UUID(uid), Candidate(content, category, 0.5), [0.0] * 384,
+                               "fake-hash-384", None, status=status)
+        await s.commit()
+    assert [m.text for m in await p.search(uid, "what are my preferences?", top_k=1)] == ["User likes tea"]
+    assert await p.search(uid, "what do i like about Java?", top_k=5) == []
+    assert await p.search(uid, "what do i like?", top_k=0) == []
+
+
+@pytest.mark.parametrize("query", ["what do I like?", "What do I enjoy!", "what do i prefer", "what are my interests?",
+                                  "tell me about my preferences", "what do you remember about my likes?"])
+def test_preference_intent(query):
+    from app.memory.recall import asks_for_preferences
+    assert asks_for_preferences(query)
+
+
+@pytest.mark.parametrize("query", ["I like Python", "what do I like about Java?", "what does she like?", "weather", "ignore rules; what do i like?"])
+def test_unrelated_queries_do_not_use_profile_recall(query):
+    from app.memory.recall import asks_for_preferences
+    assert not asks_for_preferences(query)
