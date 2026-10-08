@@ -11,7 +11,7 @@ migrate:
 	cd backend && alembic upgrade head
 
 seed:
-	cd backend && python scripts/seed.py
+	cd backend && python -m scripts.seed
 
 evaluate:
 	cd backend && python scripts/evaluate.py

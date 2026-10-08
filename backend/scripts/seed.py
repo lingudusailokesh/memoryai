@@ -1,6 +1,7 @@
 """Create a safe local demo account and sample activity.
 
-Run: cd backend && python scripts/seed.py
+Run locally: cd backend && python -m scripts.seed
+This does not create a production account unless pointed at a production DB.
 """
 import asyncio
 
@@ -8,10 +9,12 @@ from app.core.security import hash_password
 from app.db.session import SessionLocal
 from app.models import Conversation, Memory, Message, User
 
+DEMO_EMAIL = "demo@example.com"  # EmailStr rejects the special-use .local domain.
+
 
 async def main() -> None:
     async with SessionLocal() as session:
-        user = User(email="demo@memoryai.local", name="Demo User", password_hash=hash_password("demo-password-123"))
+        user = User(email=DEMO_EMAIL, name="Demo User", password_hash=hash_password("demo-password-123"))
         session.add(user)
         await session.flush()
         conversation = Conversation(user_id=user.id, title="Preparing for SDE interviews")
@@ -24,7 +27,7 @@ async def main() -> None:
             Memory(user_id=user.id, content="User is learning DSA in Python.", category="skill", importance=0.85, embedding=[0.0] * 384, embedding_model="seed"),
         ])
         await session.commit()
-    print("Seeded demo@memoryai.local / demo-password-123")
+    print(f"Seeded {DEMO_EMAIL} / demo-password-123")
 
 
 if __name__ == "__main__":
